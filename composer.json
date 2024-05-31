@@ -1,0 +1,20 @@
+{
+    "name": "manasahtech/container",
+    "description": "The ManasahTech Container package.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Manasahtech\\Container\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "RuyahTech, SLLC",
+            "email": "manasahtech@ruyahtech.com"
+        }
+    ],
+    "require": {
+        "manasahtech/contracts": "^1.0"
+    }
+}
