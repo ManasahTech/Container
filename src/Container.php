@@ -3,302 +3,138 @@
 namespace ManasahTech\Container;
 
 use Closure;
+use Exception;
+use ReflectionClass;
+
 // use ManasahTech\Contracts\Container\BindingResolutionException;
 // use ManasahTech\Contracts\Container\CircularDependencyException;
 use ManasahTech\Contracts\Container\Container as ContainerContract;
+use ManasahTech\Container\Attributes\Injectable;
+use ManasahTech\Container\Scopes\TransientScope;
 
 
 class Container implements ContainerContract
 {
-    /**
-     * The current globally available container (if any).
-     *
-     * @var static
-     */
-    protected static $instance;
-
-    /**
-     * An array of the types that have been resolved.
-     *
-     * @var bool[]
-     */
-    protected $resolved = [];
-
-    /**
-     * The container's bindings.
-     *
-     * @var array[]
-     */
     protected $bindings = [];
-
-    /**
-     * The container's method bindings.
-     *
-     * @var \Closure[]
-     */
-    protected $methodBindings = [];
-
-    /**
-     * The container's shared instances.
-     *
-     * @var object[]
-     */
-    protected $instances = [];
-
-    /**
-     * The container's scoped instances.
-     *
-     * @var array
-     */
-    protected $scopedInstances = [];
-
-    /**
-     * The registered type aliases.
-     *
-     * @var string[]
-     */
-    protected $aliases = [];
+    protected $sharedInstances = [];
 
 
-
-
-
-
-    /**
-     * Finds an entry of the container by its identifier and returns it.
-     *
-     * @param string $id Identifier of the entry to look for.
-     *
-     * @throws NotFoundExceptionInterface  No entry was found for **this** identifier.
-     * @throws ContainerExceptionInterface Error while retrieving the entry.
-     *
-     * @return mixed Entry.
-     */
-    public function get(string $id){}
-
-    /**
-     * Returns true if the container can return an entry for the given identifier.
-     * Returns false otherwise.
-     *
-     * `has($id)` returning true does not mean that `get($id)` will not throw an exception.
-     * It does however mean that `get($id)` will not throw a `NotFoundExceptionInterface`.
-     *
-     * @param string $id Identifier of the entry to look for.
-     *
-     * @return bool
-     */
-    public function has(string $id): bool {
+    //----------
+    public function has($key) : bool
+    {
         return false;
     }
+    public function get($key)
+    {
+        return null;
+    }
+    //----------
+    
 
-    /**
-     * Determine if the given abstract type has been bound.
-     *
-     * @param  string  $abstract
-     * @return bool
-     */
-    public function bound($abstract){}
+    public function bind($abstract, $concrete = null, $scope = TransientScope::class)
+    {
+        if (is_null($concrete)) {
+            $concrete = $abstract;
+        }
 
-    /**
-     * Alias a type to a different name.
-     *
-     * @param  string  $abstract
-     * @param  string  $alias
-     * @return void
-     *
-     * @throws \LogicException
-     */
-    public function alias($abstract, $alias){}
+        if (!$concrete instanceof Closure) {
+            $concrete = $this->getClosure($abstract, $concrete);
+        }
 
-    /**
-     * Assign a set of tags to a given binding.
-     *
-     * @param  array|string  $abstracts
-     * @param  array|mixed  ...$tags
-     * @return void
-     */
-    public function tag($abstracts, $tags){}
+        $this->bindings[$abstract] = compact('concrete', 'scope');
+    }
 
-    /**
-     * Resolve all of the bindings for a given tag.
-     *
-     * @param  string  $tag
-     * @return iterable
-     */
-    public function tagged($tag){}
+    protected function getClosure($abstract, $concrete)
+    {
+        return function($container) use ($abstract, $concrete) {
+            return $container->build($concrete);
+        };
+    }
 
-    /**
-     * Register a binding with the container.
-     *
-     * @param  string  $abstract
-     * @param  \Closure|string|null  $concrete
-     * @param  bool  $shared
-     * @return void
-     */
-    public function bind($abstract, $concrete = null, $shared = false){}
+    public function build($concrete)
+    {
+        if ($concrete instanceof Closure) {
+            return $concrete($this);
+        }
 
-    /**
-     * Bind a callback to resolve with Container::call.
-     *
-     * @param  array|string  $method
-     * @param  \Closure  $callback
-     * @return void
-     */
-    public function bindMethod($method, $callback){}
+        $reflector = new ReflectionClass($concrete);
 
-    /**
-     * Register a binding if it hasn't already been registered.
-     *
-     * @param  string  $abstract
-     * @param  \Closure|string|null  $concrete
-     * @param  bool  $shared
-     * @return void
-     */
-    public function bindIf($abstract, $concrete = null, $shared = false){}
+        if (!$reflector->isInstantiable()) {
+            throw new Exception("Class {$concrete} is not instantiable.");
+        }
 
-    /**
-     * Register a shared binding in the container.
-     *
-     * @param  string  $abstract
-     * @param  \Closure|string|null  $concrete
-     * @return void
-     */
-    public function singleton($abstract, $concrete = null){}
+        $constructor = $reflector->getConstructor();
 
-    /**
-     * Register a shared binding if it hasn't already been registered.
-     *
-     * @param  string  $abstract
-     * @param  \Closure|string|null  $concrete
-     * @return void
-     */
-    public function singletonIf($abstract, $concrete = null){}
+        if (is_null($constructor)) {
+            return new $concrete;
+        }
 
-    /**
-     * Register a scoped binding in the container.
-     *
-     * @param  string  $abstract
-     * @param  \Closure|string|null  $concrete
-     * @return void
-     */
-    public function scoped($abstract, $concrete = null){}
+        $parameters = $constructor->getParameters();
+        $dependencies = $this->resolveDependencies($parameters);
 
-    /**
-     * Register a scoped binding if it hasn't already been registered.
-     *
-     * @param  string  $abstract
-     * @param  \Closure|string|null  $concrete
-     * @return void
-     */
-    public function scopedIf($abstract, $concrete = null){}
+        return $reflector->newInstanceArgs($dependencies);
+    }
 
-    /**
-     * "Extend" an abstract type in the container.
-     *
-     * @param  string  $abstract
-     * @param  \Closure  $closure
-     * @return void
-     *
-     * @throws \InvalidArgumentException
-     */
-    public function extend($abstract, Closure $closure){}
+    protected function resolveDependencies($parameters)
+    {
+        $dependencies = [];
 
-    /**
-     * Register an existing instance as shared in the container.
-     *
-     * @param  string  $abstract
-     * @param  mixed  $instance
-     * @return mixed
-     */
-    public function instance($abstract, $instance){}
+        foreach ($parameters as $parameter) {
+            $dependency = $parameter->getClass();
 
-    /**
-     * Add a contextual binding to the container.
-     *
-     * @param  string  $concrete
-     * @param  string  $abstract
-     * @param  \Closure|string  $implementation
-     * @return void
-     */
-    public function addContextualBinding($concrete, $abstract, $implementation){}
+            if (is_null($dependency)) {
+                if ($parameter->isDefaultValueAvailable()) {
+                    $dependencies[] = $parameter->getDefaultValue();
+                } else {
+                    throw new Exception("Cannot resolve the dependency.");
+                }
+            } else {
+                $dependencies[] = $this->resolve($dependency->name);
+            }
+        }
 
-    /**
-     * Define a contextual binding.
-     *
-     * @param  string|array  $concrete
-     * @return \ManasahTech\Contracts\Container\ContextualBindingBuilder
-     */
-    public function when($concrete){}
+        return $dependencies;
+    }
 
-    /**
-     * Get a closure to resolve the given type from the container.
-     *
-     * @param  string  $abstract
-     * @return \Closure
-     */
-    public function factory($abstract){}
+    public function resolve($abstract)
+    {
+        if (!isset($this->bindings[$abstract])) {
+            $this->autoBind($abstract);
+        }
 
-    /**
-     * Flush the container of all bindings and resolved instances.
-     *
-     * @return void
-     */
-    public function flush(){}
+        $binding = $this->bindings[$abstract];
+        $concrete = $binding['concrete'];
+        $scopeClass = $binding['scope'];
 
-    /**
-     * Resolve the given type from the container.
-     *
-     * @param  string  $abstract
-     * @param  array  $parameters
-     * @return mixed
-     *
-     * @throws \ManasahTech\Contracts\Container\BindingResolutionException
-     */
-    public function make($abstract, array $parameters = []){}
+        if (!class_exists($scopeClass)) {
+            throw new Exception("Scope class {$scopeClass} does not exist.");
+        }
 
-    /**
-     * Call the given Closure / class@method and inject its dependencies.
-     *
-     * @param  callable|string  $callback
-     * @param  array  $parameters
-     * @param  string|null  $defaultMethod
-     * @return mixed
-     */
-    public function call($callback, array $parameters = [], $defaultMethod = null){}
+        $scope = new $scopeClass();
+        if (!$scope instanceof Scope) {
+            throw new Exception("Scope class {$scopeClass} must implement Scope interface.");
+        }
 
-    /**
-     * Determine if the given abstract type has been resolved.
-     *
-     * @param  string  $abstract
-     * @return bool
-     */
-    public function resolved($abstract){}
+        return $scope->resolve($this, $abstract, function() use ($concrete) {
+            return $this->build($concrete);
+        });
+    }
 
-    /**
-     * Register a new before resolving callback.
-     *
-     * @param  \Closure|string  $abstract
-     * @param  \Closure|null  $callback
-     * @return void
-     */
-    public function beforeResolving($abstract, ?Closure $callback = null){}
+    protected function autoBind($abstract)
+    {
+        $reflector = new ReflectionClass($abstract);
+        $attributes = $reflector->getAttributes(Injectable::class);
 
-    /**
-     * Register a new resolving callback.
-     *
-     * @param  \Closure|string  $abstract
-     * @param  \Closure|null  $callback
-     * @return void
-     */
-    public function resolving($abstract, ?Closure $callback = null){}
+        if (!empty($attributes)) {
+            $attribute = $attributes[0]->newInstance();
+            $this->bind($abstract, $abstract, $attribute->scope);
+        } else {
+            $this->bind($abstract, $abstract);
+        }
+    }
 
-    /**
-     * Register a new after resolving callback.
-     *
-     * @param  \Closure|string  $abstract
-     * @param  \Closure|null  $callback
-     * @return void
-     */
-    public function afterResolving($abstract, ?Closure $callback = null){}
-
+    public function make($abstract)
+    {
+        return $this->resolve($abstract);
+    }
 }
